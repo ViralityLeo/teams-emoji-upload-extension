@@ -1,0 +1,85 @@
+.teams-slackmojis-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  margin: 12px auto;
+  max-width: 1000px;
+  border: 1px solid #6264a7;
+  border-radius: 6px;
+  background: #f1f1fb;
+  color: #252538;
+  font:
+    13px/1.4 system-ui,
+    sans-serif;
+}
+.teams-slackmojis-panel select {
+  max-width: min(300px, 80vw);
+  padding: 4px;
+  background: #fff;
+  color: #252538;
+}
+.teams-slackmojis-status {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.teams-slackmojis-panel button,
+ul.emojis li.emoji > .teams-slackmojis-button {
+  border: 1px solid #6264a7;
+  border-radius: 4px;
+  background: #6264a7;
+  color: white;
+  cursor: pointer;
+  font:
+    11px/1.4 system-ui,
+    sans-serif;
+  padding: 3px 7px;
+}
+li.emoji:has(> .teams-slackmojis-button) {
+  position: relative;
+}
+ul.emojis li.emoji > .teams-slackmojis-button {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+}
+.teams-slackmojis-panel button:disabled {
+  opacity: 0.6;
+}
+.teams-slackmojis-button:disabled {
+  cursor: default;
+}
+.teams-slackmojis-button[data-state="loading"]::after {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ffffff66;
+  border-top-color: white;
+  border-radius: 50%;
+  animation: teams-slackmojis-spin 0.8s linear infinite;
+}
+@keyframes teams-slackmojis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teams-slackmojis-button[data-state="loading"]::after {
+    animation: none;
+  }
+}
+.teams-slackmojis-panel :focus-visible,
+.teams-slackmojis-button:focus-visible {
+  outline: 2px solid #6264a7;
+  outline-offset: 3px;
+}

@@ -1,26 +1,91 @@
+import {
+  downloadSlackmoji,
+  isSlackmojisPage,
+  slackmojisSessions,
+} from "./slackmojisImport";
+import { getExtensionApi } from "./extensionApi";
 import MsTeamsClient from "./msTeams";
-import { ProcessResult, FileDetails } from "./types";
+import { ProcessResult, FileDetails, TeamsTokens } from "./types";
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "processFiles") {
-    const files = JSON.parse(message.files) as FileDetails[];
-    // Set initial processing state
-    chrome.storage.local.set({
-      processingState: { status: "Processing...", type: "processing" },
-    });
-    handleFileProcessing(files, message.tokens)
-      .then(sendResponse)
-      .catch((error) => {
-        const errorMessage = formatErrorMessage(error);
-        // Store error state
-        chrome.storage.local.set({
-          processingState: { status: errorMessage, type: "error" },
-        });
-        sendResponse({ success: false, error: errorMessage });
+getExtensionApi().runtime.onMessage.addListener(
+  (message, sender, sendResponse) => {
+    if (
+      message.action === "slackmojisTargets" ||
+      message.action === "importSlackmoji"
+    ) {
+      if (!isSlackmojisPage(sender.url)) {
+        sendResponse({ success: false, error: "Slackmojis request rejected" });
+        return;
+      }
+      (message.action === "slackmojisTargets"
+        ? slackmojisSessions().then((sessions) => ({
+            success: true,
+            tenantIds: [
+              ...new Set(sessions.map((session) => session.permissionsId!)),
+            ],
+          }))
+        : handleSlackmojisImport(
+            message.tenantId,
+            message.imageUrl,
+            message.name,
+          )
+      )
+        .then(sendResponse)
+        .catch((error) =>
+          sendResponse({ success: false, error: formatErrorMessage(error) }),
+        );
+      return true;
+    }
+    if (message.action === "checkEmojiDuplicates") {
+      enqueue(async () => {
+        const tokens = message.tokens as TeamsTokens;
+        if (!tokens?.ic3 || !tokens.chatsvcagg || !tokens.permissionsId)
+          throw new Error("Open a signed-in Teams tab, then refresh tenants.");
+        return new MsTeamsClient(
+          tokens.ic3,
+          tokens.chatsvcagg,
+          tokens.permissionsId,
+        ).checkDuplicates();
+      })
+        .then(sendResponse)
+        .catch((error) =>
+          sendResponse({ success: false, error: formatErrorMessage(error) }),
+        );
+      return true;
+    }
+    if (message.action === "browseEmojis") {
+      handleBrowseEmojis(
+        message.tokens,
+        message.query,
+        message.page,
+        message.requestId,
+      )
+        .then(sendResponse)
+        .catch((error) =>
+          sendResponse({ success: false, error: formatErrorMessage(error) }),
+        );
+      return true;
+    }
+    if (message.action === "processFiles") {
+      const files = JSON.parse(message.files) as FileDetails[];
+      // Set initial processing state
+      getExtensionApi().storage.local.set({
+        processingState: { status: "Processing...", type: "processing" },
       });
-    return true;
-  }
-});
+      handleFileProcessing(files, message.tokens)
+        .then(sendResponse)
+        .catch((error) => {
+          const errorMessage = formatErrorMessage(error);
+          // Store error state
+          getExtensionApi().storage.local.set({
+            processingState: { status: errorMessage, type: "error" },
+          });
+          sendResponse({ success: false, error: errorMessage });
+        });
+      return true;
+    }
+  },
+);
 
 export function formatErrorMessage(error: any): string {
   // If it's a standard error object
@@ -52,7 +117,79 @@ export function formatErrorMessage(error: any): string {
   return String(error);
 }
 
-export async function handleFileProcessing(
+// Serialize batches in this background context so two popups cannot race each other.
+let processingQueue: Promise<void> = Promise.resolve();
+export function handleFileProcessing(
+  files: FileDetails[],
+  tokens: Parameters<typeof processFiles>[1],
+): Promise<ProcessResult> {
+  return enqueue(() => processFiles(files, tokens));
+}
+
+function enqueue<T>(work: () => Promise<T>): Promise<T> {
+  const task = processingQueue.then(work);
+  processingQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
+
+export function handleBrowseEmojis(
+  tokens: TeamsTokens,
+  query = "",
+  page = 0,
+  requestId?: string,
+) {
+  return enqueue(async () => {
+    if (!tokens?.ic3 || !tokens.chatsvcagg || !tokens.permissionsId)
+      throw new Error("Open a signed-in Teams tab, then reopen the extension.");
+    if (
+      typeof query !== "string" ||
+      query.length > 200 ||
+      !Number.isInteger(page) ||
+      page < 0
+    )
+      throw new Error("Invalid emoji viewer request");
+    return new MsTeamsClient(
+      tokens.ic3,
+      tokens.chatsvcagg,
+      tokens.permissionsId,
+    ).browseEmojis(
+      query,
+      page,
+      requestId
+        ? (update) => {
+            void getExtensionApi()
+              .runtime.sendMessage({
+                type: "emojiPreviewUpdate",
+                requestId,
+                update,
+              })
+              .catch(() => undefined);
+          }
+        : undefined,
+    );
+  });
+}
+
+export async function handleSlackmojisImport(
+  tenantId: string,
+  imageUrl: string,
+  name: string,
+): Promise<ProcessResult> {
+  const tokens = (await slackmojisSessions()).find(
+    (session) => session.permissionsId === tenantId,
+  );
+  if (!tokens)
+    throw new Error(
+      "Open the extension on a signed-in Teams tab, then refresh Teams tenants here.",
+    );
+  const file = await downloadSlackmoji(imageUrl, name);
+  return handleFileProcessing([file], tokens);
+}
+
+async function processFiles(
   files: FileDetails[],
   tokens: {
     chatsvcagg: string | null;
@@ -63,7 +200,7 @@ export async function handleFileProcessing(
   try {
     if (!tokens.chatsvcagg || !tokens.ic3 || !tokens.permissionsId) {
       const errorMsg = "Could not find required tokens";
-      chrome.storage.local.set({
+      getExtensionApi().storage.local.set({
         processingState: { status: errorMsg, type: "error" },
       });
       throw new Error(errorMsg);
@@ -76,14 +213,14 @@ export async function handleFileProcessing(
     const result = await teams.uploadFiles(files);
 
     // Store processing result state
-    chrome.storage.local.set({
+    getExtensionApi().storage.local.set({
       processingState: {
         status: result.status || "",
         type: result.success ? "success" : "error",
       },
     });
 
-    chrome.runtime.sendMessage({
+    getExtensionApi().runtime.sendMessage({
       type: "processUpdate",
       success: result.success,
       status: result.status,
@@ -96,11 +233,11 @@ export async function handleFileProcessing(
     const errorResult = { success: false, error: errorMessage };
 
     // Store error state
-    chrome.storage.local.set({
+    getExtensionApi().storage.local.set({
       processingState: { status: errorMessage, type: "error" },
     });
 
-    chrome.runtime.sendMessage({
+    getExtensionApi().runtime.sendMessage({
       type: "processUpdate",
       ...errorResult,
     });

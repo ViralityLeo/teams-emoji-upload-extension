@@ -213,3 +213,80 @@ describe("TokenStore", () => {
     });
   });
 });
+
+describe("Teams session discovery", () => {
+  const pair = { chatsvcagg: "chat", ic3: "ic3", permissionsId: "tenant" };
+  let items: Record<string, unknown>;
+  let execute: jest.Mock;
+  let query: jest.Mock;
+  beforeEach(() => {
+    items = {};
+    query = jest.fn().mockResolvedValue([
+      {
+        id: 42,
+        url: "https://teams.cloud.microsoft/",
+        cookieStoreId: "firefox-container-2",
+      },
+    ]);
+    execute = jest.fn().mockResolvedValue([
+      {
+        result: {
+          "chatsvcagg-key": { secret: "chat", realm: "tenant" },
+          "ic3.teams.office-key": { secret: "ic3", realm: "tenant" },
+        },
+      },
+    ]);
+    window.chrome = {
+      tabs: { query },
+      scripting: { executeScript: execute },
+      storage: {
+        local: {
+          get: jest.fn(async () => items),
+          set: jest.fn(async (values) => Object.assign(items, values)),
+        },
+      },
+    } as any;
+  });
+  it("captures cloud Teams by tab ID, including Firefox containers", async () => {
+    expect(await TokenStore.refreshFromOpenTeamsTabs()).toEqual([pair]);
+    expect(query).toHaveBeenCalledWith({
+      url: ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*"],
+    });
+    expect(execute.mock.calls[0][0].target).toEqual({ tabId: 42 });
+    expect(items.teamsTenantSessions).toEqual([pair]);
+  });
+  it("reads sessionStorage as well as localStorage", async () => {
+    await TokenStore.refreshFromOpenTeamsTabs();
+    localStorage.clear();
+    sessionStorage.clear();
+    sessionStorage.setItem(
+      "chatsvcagg-session",
+      JSON.stringify({ secret: "session-chat", realm: "tenant" }),
+    );
+    const collected = execute.mock.calls[0][0].func();
+    expect(collected).toEqual({
+      "chatsvcagg-session": { secret: "session-chat", realm: "tenant" },
+    });
+    sessionStorage.clear();
+  });
+  it("keeps previously captured paired sessions if Teams tab is closed", async () => {
+    items.teamsTenantSessions = [pair];
+    query.mockResolvedValue([]);
+    expect(await TokenStore.refreshFromOpenTeamsTabs()).toEqual([pair]);
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("reports unreadable login cache instead of silent missing tenants", async () => {
+    execute.mockResolvedValue([
+      { result: { "chatsvcagg-key": { ciphertext: "encrypted" } } },
+    ]);
+    await expect(TokenStore.refreshFromOpenTeamsTabs()).rejects.toThrow(
+      "no readable token pair",
+    );
+  });
+  it("reports site-access failure", async () => {
+    execute.mockRejectedValue(new Error("Missing host permission"));
+    await expect(TokenStore.refreshFromOpenTeamsTabs()).rejects.toThrow(
+      "allow the extension on its site",
+    );
+  });
+});

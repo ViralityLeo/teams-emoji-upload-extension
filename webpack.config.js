@@ -5,6 +5,8 @@ const srcDir = path.join(__dirname, "src");
 module.exports = {
   entry: {
     popup: path.join(srcDir, "popup.ts"),
+    viewer: path.join(srcDir, "viewer.ts"),
+    slackmojis: path.join(srcDir, "slackmojis.ts"),
     msTeams: path.join(srcDir, "msTeams.ts"),
     tokenStore: path.join(srcDir, "tokenStore.ts"),
     background: path.join(srcDir, "background.ts"),
@@ -13,6 +15,7 @@ module.exports = {
   output: {
     path: path.join(__dirname, "dist"),
     filename: "[name].js",
+    clean: true,
   },
   plugins: [
     new webpack.ProvidePlugin({

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Teams emoji library</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", sans-serif;
+        background: #202026;
+        color: #eee;
+      }
+      body {
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 32px 24px;
+      }
+      h1 {
+        margin-bottom: 8px;
+      }
+      p {
+        color: #bbb;
+      }
+      .controls {
+        display: flex;
+        gap: 12px;
+        align-items: end;
+        flex-wrap: wrap;
+        margin: 24px 0;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 14px;
+      }
+      input,
+      select,
+      button {
+        font: inherit;
+        padding: 10px 12px;
+        color: #eee;
+        background: #35353f;
+        border: 1px solid #666;
+        border-radius: 6px;
+      }
+      input {
+        width: 240px;
+      }
+      select {
+        max-width: 100%;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      :focus-visible {
+        outline: 2px solid #aaaaff;
+        outline-offset: 3px;
+      }
+      #status {
+        min-height: 24px;
+      }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 16px;
+      }
+      .emoji-card {
+        margin: 0;
+        padding: 16px;
+        background: #2d2d36;
+        border-radius: 8px;
+        text-align: center;
+        overflow-wrap: anywhere;
+      }
+      .emoji-card img {
+        width: 72px;
+        height: 72px;
+        object-fit: contain;
+      }
+      .emoji-card figcaption {
+        margin-top: 12px;
+        font-size: 14px;
+      }
+      .preview-loading {
+        height: 72px;
+        display: grid;
+        place-items: center;
+      }
+      .preview-loading::after {
+        content: "";
+        width: 24px;
+        height: 24px;
+        border: 3px solid #555;
+        border-top-color: #aaaaff;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .preview-loading::after {
+          animation: none;
+        }
+      }
+      .preview-error {
+        min-height: 72px;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        color: #bbb;
+      }
+      nav {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        justify-content: center;
+        margin-top: 24px;
+      }
+      #tenantNote {
+        overflow-wrap: anywhere;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Teams emoji library</h1>
+    <p id="tenantNote">
+      Choose a tenant captured from your signed-in Teams tab.
+    </p>
+    <form id="searchForm" class="controls">
+      <label
+        >Tenant<select id="tenantSelect" aria-label="Tenant"></select
+      ></label>
+      <label
+        >Emoji name<input
+          id="search"
+          type="search"
+          placeholder="Search names"
+          maxlength="200"
+      /></label>
+      <button id="searchButton" type="submit">Search</button>
+      <button id="refreshButton" type="button">Refresh</button>
+      <button id="duplicatesButton" type="button">Check duplicates</button>
+    </form>
+    <p id="status" role="status" aria-live="polite">Loading tenants…</p>
+    <div id="grid" aria-label="Existing custom emojis"></div>
+    <nav aria-label="Emoji pages">
+      <button id="previous" type="button" disabled>Previous</button>
+      <span id="pageLabel">Page 1</span>
+      <button id="next" type="button" disabled>Next</button>
+    </nav>
+    <section
+      id="duplicates"
+      aria-label="Duplicate check results"
+      aria-live="polite"
+    ></section>
+    <p>
+      Previews warm the duplicate-check cache as you browse. Check duplicates
+      scans the whole tenant, reusing fresh cached hashes.
+    </p>
+    <script src="dist/viewer.js"></script>
+  </body>
+</html>

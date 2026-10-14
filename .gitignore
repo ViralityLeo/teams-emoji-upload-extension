@@ -4,3 +4,8 @@ node_modules
 
 coverage
 chrome-extension.zip
+
+firefox/
+firefox-extension.zip
+
+firefox-source.zip

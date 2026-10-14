@@ -29,6 +29,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build Firefox
+        run: npm run build:firefox
+
       - name: Lint
         run: npm run format:check
 
@@ -38,6 +41,9 @@ jobs:
       - name: Zip
         run: npm run zip
 
+      - name: Zip Firefox
+        run: npm run zip:firefox
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -46,3 +52,5 @@ jobs:
             dist/
             icons/
             manifest.json
+            chrome-extension.zip
+            firefox-extension.zip

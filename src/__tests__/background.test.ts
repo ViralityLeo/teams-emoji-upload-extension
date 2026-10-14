@@ -1,5 +1,7 @@
+import * as slackmojisImport from "../slackmojisImport";
 // Set up chrome mock before importing modules
 const mockChrome = {
+  tabs: { query: jest.fn().mockResolvedValue([]) },
   runtime: {
     onMessage: {
       addListener: jest.fn(),
@@ -22,7 +24,15 @@ Object.defineProperty(global, "chrome", {
 
 // Now import the modules
 import { ProcessResult, FileDetails } from "../types";
-import { formatErrorMessage, handleFileProcessing } from "../background";
+import {
+  formatErrorMessage,
+  handleFileProcessing,
+  handleBrowseEmojis,
+  handleSlackmojisImport,
+} from "../background";
+
+const backgroundListener =
+  mockChrome.runtime.onMessage.addListener.mock.calls[0][0];
 
 // Mock MsTeamsClient
 jest.mock("../msTeams", () => {
@@ -41,6 +51,141 @@ describe("Background Script", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("rejects Slackmojis messages from other pages", () => {
+    const reply = jest.fn();
+    backgroundListener(
+      { action: "importSlackmoji" },
+      { url: "https://evil.example" },
+      reply,
+    );
+    expect(reply).toHaveBeenCalledWith({
+      success: false,
+      error: "Slackmojis request rejected",
+    });
+    expect(mockChrome.storage.local.get).not.toHaveBeenCalled();
+    expect(MsTeamsClient).not.toHaveBeenCalled();
+  });
+
+  it("returns tenant IDs without exposing stored Teams tokens", async () => {
+    const reply = jest.fn();
+    mockChrome.storage.local.get.mockResolvedValue({
+      teamsTenantSessions: [
+        {
+          permissionsId: "tenant",
+          ic3: "secret-ic3",
+          chatsvcagg: "secret-chat",
+        },
+      ],
+    });
+    backgroundListener(
+      { action: "slackmojisTargets" },
+      { url: "https://slackmojis.com/" },
+      reply,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reply).toHaveBeenCalledWith({
+      success: true,
+      tenantIds: ["tenant"],
+    });
+    expect(JSON.stringify(reply.mock.calls)).not.toContain("secret");
+  });
+
+  it("imports Slackmojis through existing deduplication upload flow", async () => {
+    const tokens = { chatsvcagg: "chat", ic3: "ic3", permissionsId: "tenant" };
+    mockChrome.storage.local.get.mockResolvedValue({
+      teamsTenantSessions: [tokens],
+    });
+    const file = {
+      name: "parrot.gif",
+      size: 6,
+      type: "image/gif",
+      base64: "R0lGODlh",
+    };
+    const download = jest
+      .spyOn(slackmojisImport, "downloadSlackmoji")
+      .mockResolvedValue(file);
+    const upload = jest
+      .fn()
+      .mockResolvedValue({ success: true, status: "Skipped existing image" });
+    MsTeamsClient.mockImplementation(() => ({ uploadFiles: upload }));
+    await expect(
+      handleSlackmojisImport(
+        "tenant",
+        "https://emojis.slackmojis.com/emojis/images/1/2/parrot.gif",
+        "parrot.gif",
+      ),
+    ).resolves.toEqual({ success: true, status: "Skipped existing image" });
+    expect(upload).toHaveBeenCalledWith([file]);
+    expect(MsTeamsClient).toHaveBeenCalledWith("ic3", "chat", "tenant");
+    download.mockRestore();
+  });
+
+  it("rejects an unknown tenant before downloading Slackmojis", async () => {
+    mockChrome.storage.local.get.mockResolvedValue({ teamsTenantSessions: [] });
+    const download = jest.spyOn(slackmojisImport, "downloadSlackmoji");
+    await expect(
+      handleSlackmojisImport(
+        "unknown",
+        "https://emojis.slackmojis.com/emojis/images/1/2/parrot.gif",
+        "parrot.gif",
+      ),
+    ).rejects.toThrow("signed-in Teams");
+    expect(download).not.toHaveBeenCalled();
+    download.mockRestore();
+  });
+
+  it("routes duplicate checks to the selected tenant", async () => {
+    const checkDuplicates = jest
+      .fn()
+      .mockResolvedValue({ success: true, tenantId: "tenant", groups: [] });
+    MsTeamsClient.mockImplementation(() => ({ checkDuplicates }));
+    const result = await new Promise((resolve) => {
+      expect(
+        backgroundListener(
+          {
+            action: "checkEmojiDuplicates",
+            tokens: { chatsvcagg: "chat", ic3: "ic3", permissionsId: "tenant" },
+          },
+          {},
+          resolve,
+        ),
+      ).toBe(true);
+    });
+    expect(result).toMatchObject({ tenantId: "tenant" });
+    expect(checkDuplicates).toHaveBeenCalledTimes(1);
+    expect(MsTeamsClient).toHaveBeenCalledWith("ic3", "chat", "tenant");
+  });
+
+  it("routes tenant browsing through the shared background queue", async () => {
+    const browse = jest
+      .fn()
+      .mockResolvedValue({ success: true, tenantId: "tenant", items: [] });
+    MsTeamsClient.mockImplementation(() => ({ browseEmojis: browse }));
+    await expect(
+      handleBrowseEmojis(
+        { chatsvcagg: "chat", ic3: "ic3", permissionsId: "tenant" },
+        "cat",
+        2,
+      ),
+    ).resolves.toMatchObject({ tenantId: "tenant" });
+    expect(MsTeamsClient).toHaveBeenCalledWith("ic3", "chat", "tenant");
+    expect(browse).toHaveBeenCalledWith("cat", 2, undefined);
+  });
+
+  it("rejects missing sessions and invalid pages before viewer requests", async () => {
+    await expect(
+      handleBrowseEmojis({ chatsvcagg: null, ic3: null, permissionsId: null }),
+    ).rejects.toThrow("signed-in Teams");
+    await expect(
+      handleBrowseEmojis(
+        { chatsvcagg: "chat", ic3: "ic3", permissionsId: "tenant" },
+        "",
+        -1,
+      ),
+    ).rejects.toThrow("Invalid emoji viewer request");
+    expect(MsTeamsClient).not.toHaveBeenCalled();
   });
 
   describe("formatErrorMessage", () => {
@@ -128,6 +273,30 @@ describe("Background Script", () => {
           type: "success",
         },
       });
+    });
+
+    it("serializes concurrent batches", async () => {
+      let finishFirst!: (value: ProcessResult) => void;
+      const firstUpload = new Promise<ProcessResult>((resolve) => {
+        finishFirst = resolve;
+      });
+      const upload = jest
+        .fn()
+        .mockReturnValueOnce(firstUpload)
+        .mockResolvedValue({ success: true, status: "Done" });
+      MsTeamsClient.mockImplementation(() => ({ uploadFiles: upload }));
+      const tokens = {
+        chatsvcagg: "chat",
+        ic3: "ic3",
+        permissionsId: "tenant",
+      };
+      const first = handleFileProcessing([], tokens);
+      const second = handleFileProcessing([], tokens);
+      await Promise.resolve();
+      expect(upload).toHaveBeenCalledTimes(1);
+      finishFirst({ success: true, status: "Done" });
+      await Promise.all([first, second]);
+      expect(upload).toHaveBeenCalledTimes(2);
     });
 
     it("should handle missing tokens", async () => {

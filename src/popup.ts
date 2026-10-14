@@ -1,10 +1,12 @@
+import { clearSessionStorage } from "./emojiDedup";
+import { getExtensionApi, isFirefox } from "./extensionApi";
 import TokenStore from "./tokenStore";
 import { ProcessResult, FileDetails } from "./types";
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     // Check for existing processing state
-    const state = await chrome.storage.local.get<{
+    const state = await getExtensionApi().storage.local.get<{
       processingState?: { status: string; type: string };
     }>("processingState");
     if (state.processingState) {
@@ -18,42 +20,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       );
     }
 
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    const tab = tabs[0];
-
-    if (tab.id) {
-      const result = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => {
-          const items: Record<string, string> = {};
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (
-              key &&
-              (key.includes("chatsvcagg") || key.includes("ic3.teams.office"))
-            ) {
-              items[key] = localStorage.getItem(key) || "";
-            }
-          }
-          return items;
-        },
-      });
-
-      if (result && result[0].result) {
-        for (const [key, value] of Object.entries(result[0].result)) {
-          try {
-            const parsedValue = JSON.parse(value as string);
-            await chrome.storage.local.set({ [key]: parsedValue });
-            console.log("Stored token:", key);
-          } catch (e) {
-            console.error("Failed to parse token:", key, e);
-          }
-        }
-        console.log("Teams tokens captured from page");
-      }
-    }
+    const sessions = await TokenStore.refreshFromOpenTeamsTabs();
+    updateStatus(
+      sessions.length
+        ? `Connected to ${sessions.length} Teams tenant(s).`
+        : "Open a signed-in Teams tab, then reopen the extension.",
+      sessions.length ? "ready" : "error",
+    );
   } catch (err) {
-    console.error("Error capturing tokens:", err);
+    updateStatus(err instanceof Error ? err.message : String(err), "error");
+  } finally {
+    (
+      document.getElementById("viewButton") as HTMLButtonElement | null
+    )?.removeAttribute("disabled");
   }
 });
 
@@ -107,9 +86,16 @@ async function handleFileProcessing() {
 
     updateStatus("Processing...", "processing");
 
-    const tokens = await TokenStore.collectTokensFromStorage();
+    const sessions = await TokenStore.refreshFromOpenTeamsTabs();
+    if (sessions.length !== 1)
+      throw new Error(
+        sessions.length
+          ? "Multiple Teams tenants found. Open the intended Teams account alone before uploading local files."
+          : "Open a signed-in Teams tab first.",
+      );
+    const tokens = sessions[0];
 
-    const result = await chrome.runtime.sendMessage({
+    const result = await getExtensionApi().runtime.sendMessage({
       action: "processFiles",
       files: filesJson,
       tokens: tokens,
@@ -121,31 +107,18 @@ async function handleFileProcessing() {
     } else {
       updateStatus(status || "", success ? "success" : "processing");
 
-      await chrome.browsingData.remove(
-        {
-          origins: ["https://teams.microsoft.com"],
-        },
-        {
-          cacheStorage: true,
-          cookies: true,
-          localStorage: true,
-          serviceWorkers: true,
-          indexedDB: true,
-          cache: true,
-          appcache: true,
-        },
-      );
+      await clearTeamsData();
 
-      await chrome.storage.local.clear();
+      await clearSessionStorage();
 
-      const tabs = await chrome.tabs.query({
+      const tabs = await getExtensionApi().tabs.query({
         active: true,
         currentWindow: true,
       });
       const tab = tabs[0];
 
       if (tab.id) {
-        await chrome.tabs.reload(tab.id);
+        await getExtensionApi().tabs.reload(tab.id);
       }
     }
   } catch (error) {
@@ -188,35 +161,41 @@ document
   .getElementById("processButton")
   ?.addEventListener("click", () => handleFileProcessing());
 
+async function clearTeamsData() {
+  // Firefox refresh only: its cache removal cannot be scoped to Teams.
+  if (isFirefox()) return;
+  await getExtensionApi().browsingData.remove(
+    {
+      origins: ["https://teams.microsoft.com", "https://teams.cloud.microsoft"],
+    },
+    {
+      cacheStorage: true,
+      cookies: true,
+      localStorage: true,
+      serviceWorkers: true,
+      indexedDB: true,
+      cache: true,
+      appcache: true,
+    },
+  );
+}
+
 async function refreshTeams() {
   try {
     updateStatus("Refreshing Teams...", "processing");
 
-    await chrome.browsingData.remove(
-      {
-        origins: ["https://teams.microsoft.com"],
-      },
-      {
-        cacheStorage: true,
-        cookies: true,
-        localStorage: true,
-        serviceWorkers: true,
-        indexedDB: true,
-        cache: true,
-        appcache: true,
-      },
-    );
+    await clearTeamsData();
 
-    await chrome.storage.local.clear();
+    await clearSessionStorage();
 
-    const tabs = await chrome.tabs.query({
+    const tabs = await getExtensionApi().tabs.query({
       active: true,
       currentWindow: true,
     });
     const tab = tabs[0];
 
     if (tab.id) {
-      await chrome.tabs.reload(tab.id);
+      await getExtensionApi().tabs.reload(tab.id);
       updateStatus("Teams refreshed successfully!", "success");
     }
   } catch (error) {
@@ -226,7 +205,7 @@ async function refreshTeams() {
 
 document.getElementById("resetButton")?.addEventListener("click", refreshTeams);
 
-chrome.runtime.onMessage.addListener(
+getExtensionApi().runtime.onMessage.addListener(
   (message: { type: string; error: any; status: any; success: any }) => {
     if (message.type === "processUpdate") {
       const status = message.error || message.status;
@@ -241,7 +220,7 @@ chrome.runtime.onMessage.addListener(
 
       // Ensure we store the state in case it was sent directly from background.ts
       // Background should be storing the state, but this is a good fallback
-      chrome.storage.local.set({
+      getExtensionApi().storage.local.set({
         processingState: {
           status: status,
           type: type,
@@ -250,3 +229,13 @@ chrome.runtime.onMessage.addListener(
     }
   },
 );
+
+document.getElementById("viewButton")?.addEventListener("click", async () => {
+  try {
+    await getExtensionApi().tabs.create({
+      url: getExtensionApi().runtime.getURL("viewer.html"),
+    });
+  } catch (error) {
+    updateStatus(`Could not open emoji viewer: ${error}`, "error");
+  }
+});

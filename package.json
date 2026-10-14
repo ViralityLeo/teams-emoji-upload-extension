@@ -4,7 +4,9 @@
     "test": "jest",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "zip": "npm run build && zip -r chrome-extension.zip popup.html dist/* icons/* manifest.json"
+    "zip": "npm run build && rm -f chrome-extension.zip && zip -r chrome-extension.zip popup.html viewer.html slackmojis.css dist/* icons/* manifest.json",
+    "build:firefox": "webpack --mode production --output-path firefox/dist && node scripts/prepare-firefox.cjs",
+    "zip:firefox": "npm run build:firefox && rm -f firefox-extension.zip && cd firefox && zip -r ../firefox-extension.zip popup.html viewer.html slackmojis.css dist icons manifest.json"
   },
   "devDependencies": {
     "@babel/core": "^7.22.5",

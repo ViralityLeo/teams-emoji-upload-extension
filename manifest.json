@@ -12,7 +12,10 @@
   "host_permissions": [
     "https://teams.microsoft.com/*",
     "https://teams.microsoft.com/v2/*",
-    "https://as-prod.asyncgw.teams.microsoft.com/*"
+    "https://as-prod.asyncgw.teams.microsoft.com/*",
+    "https://slackmojis.com/*",
+    "https://emojis.slackmojis.com/*",
+    "https://teams.cloud.microsoft/*"
   ],
   "background": {
     "service_worker": "dist/background.js"
@@ -26,17 +29,9 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://teams.microsoft.com/*",
-        "https://teams.microsoft.com/v2/*"
-      ],
-      "js": ["dist/popup.js"]
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["dist/popup.js"],
-      "matches": ["https://*.microsoft.com/*"]
+      "matches": ["https://slackmojis.com/*"],
+      "js": ["dist/slackmojis.js"],
+      "css": ["slackmojis.css"]
     }
   ]
 }
