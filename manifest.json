@@ -25,13 +25,19 @@
     "sandbox": "sandbox allow-scripts allow-forms allow-popups allow-modals; script-src 'self' 'unsafe-inline' 'unsafe-eval'; child-src 'self';"
   },
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "Open Teams Emoji Uploader"
   },
   "content_scripts": [
     {
       "matches": ["https://slackmojis.com/*"],
       "js": ["dist/slackmojis.js"],
       "css": ["slackmojis.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "dist/popup.js"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

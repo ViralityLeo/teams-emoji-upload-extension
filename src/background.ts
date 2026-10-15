@@ -1,3 +1,4 @@
+import { showUploader } from "./uploaderModal";
 import {
   downloadSlackmoji,
   isSlackmojisPage,
@@ -6,6 +7,15 @@ import {
 import { getExtensionApi } from "./extensionApi";
 import MsTeamsClient from "./msTeams";
 import { ProcessResult, FileDetails, TeamsTokens } from "./types";
+
+getExtensionApi().action.onClicked.addListener((tab) => {
+  if (tab.id === undefined) return;
+  void getExtensionApi().scripting.executeScript({
+    target: { tabId: tab.id },
+    func: showUploader,
+    args: [getExtensionApi().runtime.getURL(`popup.html?tabId=${tab.id}`)],
+  });
+});
 
 getExtensionApi().runtime.onMessage.addListener(
   (message, sender, sendResponse) => {

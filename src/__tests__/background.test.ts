@@ -1,8 +1,11 @@
 import * as slackmojisImport from "../slackmojisImport";
 // Set up chrome mock before importing modules
 const mockChrome = {
+  action: { onClicked: { addListener: jest.fn() } },
+  scripting: { executeScript: jest.fn().mockResolvedValue([]) },
   tabs: { query: jest.fn().mockResolvedValue([]) },
   runtime: {
+    getURL: jest.fn((path: string) => `chrome-extension://test/${path}`),
     onMessage: {
       addListener: jest.fn(),
     },
@@ -33,6 +36,8 @@ import {
 
 const backgroundListener =
   mockChrome.runtime.onMessage.addListener.mock.calls[0][0];
+const toolbarListener =
+  mockChrome.action.onClicked.addListener.mock.calls[0][0];
 
 // Mock MsTeamsClient
 jest.mock("../msTeams", () => {
@@ -51,6 +56,16 @@ describe("Background Script", () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("opens uploader inside the originating page", () => {
+    expect(require("../../manifest.json").action.default_popup).toBeUndefined();
+    toolbarListener({ id: 42 });
+    expect(mockChrome.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 42 },
+      func: expect.any(Function),
+      args: ["chrome-extension://test/popup.html?tabId=42"],
+    });
   });
 
   it("rejects Slackmojis messages from other pages", () => {

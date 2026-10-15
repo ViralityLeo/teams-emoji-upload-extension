@@ -3,6 +3,10 @@ import { getExtensionApi, isFirefox } from "./extensionApi";
 import TokenStore from "./tokenStore";
 import { ProcessResult, FileDetails } from "./types";
 
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") window.parent.postMessage("closeUploader", "*");
+});
+
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     // Check for existing processing state
@@ -111,15 +115,7 @@ async function handleFileProcessing() {
 
       await clearSessionStorage();
 
-      const tabs = await getExtensionApi().tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const tab = tabs[0];
-
-      if (tab.id) {
-        await getExtensionApi().tabs.reload(tab.id);
-      }
+      await reloadTeamsTab();
     }
   } catch (error) {
     let errorMessage = "";
@@ -188,19 +184,20 @@ async function refreshTeams() {
 
     await clearSessionStorage();
 
-    const tabs = await getExtensionApi().tabs.query({
-      active: true,
-      currentWindow: true,
-    });
-    const tab = tabs[0];
-
-    if (tab.id) {
-      await getExtensionApi().tabs.reload(tab.id);
-      updateStatus("Teams refreshed successfully!", "success");
-    }
+    await reloadTeamsTab();
+    updateStatus("Teams refreshed successfully!", "success");
   } catch (error) {
     updateStatus(`Refresh failed: ${error}`, "error");
   }
+}
+
+async function reloadTeamsTab() {
+  const tabs = await getExtensionApi().tabs.query({
+    url: ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*"],
+  });
+  const sourceTabId = Number(new URLSearchParams(location.search).get("tabId"));
+  const tab = tabs.find((tab) => tab.id === sourceTabId) || tabs[0];
+  if (tab?.id !== undefined) await getExtensionApi().tabs.reload(tab.id);
 }
 
 document.getElementById("resetButton")?.addEventListener("click", refreshTeams);

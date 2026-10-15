@@ -7,7 +7,6 @@ manifest.permissions = manifest.permissions.filter(
 manifest.content_scripts = manifest.content_scripts.filter((script) =>
   script.matches.includes("https://slackmojis.com/*"),
 );
-delete manifest.web_accessible_resources;
 delete manifest.content_security_policy.sandbox;
 manifest.browser_specific_settings = {
   gecko: {
